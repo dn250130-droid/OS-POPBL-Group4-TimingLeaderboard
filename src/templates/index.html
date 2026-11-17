@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Group 4 - OS Timing & Live Leaderboard</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+        .container { max-width: 1100px; margin: auto; display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h1, h2 { margin-top: 0; color: #38bdf8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #334155; }
+        th { background: #0284c7; color: white; }
+        .os-box { background: #0f172a; padding: 12px; border-radius: 8px; border-left: 4px solid #22c55e; margin-top: 15px; font-size: 14px; }
+        input, button { padding: 10px; border-radius: 5px; border: none; margin-top: 10px; }
+        button { background: #22c55e; color: #0f172a; font-weight: bold; cursor: pointer; }
+        #reader { width: 100%; border-radius: 8px; overflow: hidden; }
+    </style>
+</head>
+<body>
+
+<h1 style="text-align:center;">🏃‍♂️ 1-Hour Loop Run: Timing & Live Leaderboard</h1>
+
+<div class="container">
+    <!-- KIRI: QR Scanner & OS Monitor -->
+    <div class="card">
+        <h2>📷 QR Checkpoint Scanner</h2>
+        <div id="reader"></div>
+
+        <!-- Input Manual / Simulasi Jika Tiada QR -->
+        <div style="margin-top:15px;">
+            <input type="text" id="manualId" placeholder="Taip ID Runner (cth: R001)">
+            <button onclick="sendScan(document.getElementById('manualId').value)">Scan Manual</button>
+            <button style="background:#f59e0b;" onclick="simulateBurst()">Simulasi 10 Scan Serentak</button>
+        </div>
+
+        <!-- Panel Pemantauan Konsep OS -->
+        <div class="os-box">
+            <strong>⚙️ OS I/O Kernel Monitor</strong><br><br>
+            I/O Buffer Load: <span id="bufLoad">0 / 50</span><br>
+            Interrupts (IRQs): <span id="irqCount">0</span><br>
+            Spooled Records: <span id="spoolCount">0</span><br>
+            Duplicates Ignored: <span id="dupCount">0</span>
+        </div>
+    </div>
+
+    <!-- KANAN: Live Leaderboard -->
+    <div class="card">
+        <h2>🏆 Live Leaderboard <span id="timer" style="float:right; color:#facc15;">60:00</span></h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Runner ID</th>
+                    <th>Loops</th>
+                    <th>Last Loop Time (s)</th>
+                </tr>
+            </thead>
+            <tbody id="leaderboardBody">
+                <tr><td colspan="4" style="text-align:center;">Menunggu imbasan QR pertama...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Hantar IRQ ke Backend Python
+    function sendScan(runnerId) {
+        if (!runnerId) return;
+        fetch('/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ runner_id: runnerId })
+        });
+    }
+
+    // Simulasi trafik tinggi untuk tunjuk keupayaan Buffer
+    function simulateBurst() {
+        for (let i = 1; i <= 10; i++) {
+            sendScan("RUNNER-" + i);
+        }
+    }
+
+    // Aktifkan Kamera Pengimbas QR
+    const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 200 });
+    scanner.render((decodedText) => {
+        sendScan(decodedText);
+    });
+
+    // Auto-refresh Leaderboard & OS Telemetry setiap 1 saat (Front Buffer)
+    setInterval(() => {
+        fetch('/api/leaderboard')
+            .then(res => res.json())
+            .then(data => {
+                // Kemas kini OS Monitor
+                document.getElementById('bufLoad').innerText = `${data.buffer_usage} / ${data.buffer_capacity}`;
+                document.getElementById('irqCount').innerText = data.telemetry.interrupts_received;
+                document.getElementById('spoolCount').innerText = data.telemetry.records_spooled;
+                document.getElementById('dupCount').innerText = data.telemetry.duplicates_ignored;
+
+                // Kemas kini Masa Larian 1 Jam
+                let mins = Math.floor(data.remaining_seconds / 60);
+                let secs = data.remaining_seconds % 60;
+                document.getElementById('timer').innerText = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+                // Kemas kini Jadual Leaderboard
+                const tbody = document.getElementById('leaderboardBody');
+                if (data.leaderboard.length === 0) return;
+                tbody.innerHTML = data.leaderboard.map((r, idx) => `
+                    <tr>
+                        <td>#${idx + 1}</td>
+                        <td><strong>${r.id}</strong></td>
+                        <td>${r.loops}</td>
+                        <td>${r.total_time}s</td>
+                    </tr>
+                `).join('');
+            });
+    }, 1000);
+</script>
+
+</body>
+</html>
